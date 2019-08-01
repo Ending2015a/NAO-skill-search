@@ -3,7 +3,8 @@ import sys
 import time
 import logging
 
-sys.path.append('./nao_search')
+sys.path.append(os.path.abspath('./nao_search'))
+sys.path.append(os.path.abspath('../lib'))
 
 import gym
 
@@ -12,15 +13,16 @@ from stable_baselines.common.vec_env import DummyVecEnv
 from stable_baselines.common.policies import MlpPolicy
 
 from nao_search import epd
-from nao_search.common.utils import random_seqences
+from nao_search.common.utils import random_sequences
 from nao_search.common.utils import min_max_normalization
 from nao_search.common.utils import pairwise_accuracy
+from nao_search.common.utils import get_top_n
 
 from nao_search.common.logger import Logger
 from nao_search.common.logger import LoggingConfig
 
 from env_wrapper import ActionRemapWrapper, SkillWrapper
-
+from manager import AtariPolicyManager
 
 LoggingConfig.Use(filename='nao_skill_search_atari_(1, 9).train.log', 
                   output_to_file=True,
@@ -75,21 +77,21 @@ def make_dirs(path):
     import errno
     try:
         os.makedirs(path)
-    except e:
+    except os.error as e:
         if e.errno != errno.EEXIST:
             raise
 
 def divide_skills(skills):
     def divide_skill(skill):
         
-        assert len(skill) // NUM_SKILLS == SKILL_LENGTH
+        assert len(skill) // NUM_SKILLS_PER_SET == SKILL_LENGTH
 
         avg = SKILL_LENGTH
         out = []
         last = 0
 
-        while last < len(seq):
-            out.append(seq[int(last):int(last + avg)])
+        while last < len(skill):
+            out.append(skill[int(last):int(last + avg)])
             last += avg
 
         return out
@@ -115,7 +117,7 @@ def log_top_n_scores(N, _skills, _scores):
 def output_skills(path, _skills, _scores):
     with open(path, 'w') as f:
         for skill, score in zip(_skills, _scores):
-            f.write('{}:{}'.format(skill, scores))
+            f.write('{}:{}'.format(skill, score))
 # ===============
 
 
@@ -173,7 +175,7 @@ model = epd.Model(
 for iteration in range(NUM_ITERATION):
 
 
-    MODEL_NAME = TENSORBOARD_LOGNAME + '_iter{}'.format(itereation)
+    MODEL_NAME = TENSORBOARD_LOGNAME + '_iter{}'.format(iteration)
     is_first_iteration = 0 == iteration
 
     # normalize scores
