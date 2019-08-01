@@ -1,0 +1,3 @@
+[submodule "nao_search"]
+	path = nao_search
+	url = https://github.com/Ending2015a/NAO-search.git
