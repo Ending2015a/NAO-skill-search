@@ -41,23 +41,29 @@ SKILL_LENGTH = 9
 NUM_SKILLS_PER_SET = 1
 ACTION_SPACE = 6
 
+# === NAO ===
 NUM_ITERATION = 5
 UPDATE_BATCHSIZE = 128
 CPU = 1
 EPOCHS = 300
-EVAL_INTERVAL = 50
+EVAL_INTERVAL = 1
 LOG_INTERVAL = 1
-TRAINING_STEPS = 5000
 
+# === Atari ===
+TRAINING_STEPS = 5000
 ENV_ID = 'Alien-ramDeterministic-v4'
+
+# === Misc ===
 MODEL_SAVE_PATH = './models'
 SKILL_SAVE_PATH = './skills'
 TENSORBOARD_LOGDIR = './epd_logs'
-TENSORBOARD_LOGNAME = 'nao_skill_search_atari_(1, 9)'
+TENSORBOARD_LOGNAME = 'nao_skill_search_atari_({}, {})'.format(NUM_SKILLS_PER_SET, SKILL_LENGTH)
 # ==================
 
 
 # === Utility ===
+
+# === custom non-daemon process ===
 class NonDaemonProcess(multiprocessing.Process):
     def _get_daemon(self):
         return False
