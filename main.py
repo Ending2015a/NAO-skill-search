@@ -51,12 +51,12 @@ ACTION_SPACE = 6
 NUM_ITERATION = 5
 UPDATE_BATCHSIZE = 128
 CPU = 1
-EPOCHS = 300
-EVAL_INTERVAL = 1
+EPOCHS = 1000
+EVAL_INTERVAL = 50
 LOG_INTERVAL = 1
 
 # === Atari ===
-TRAINING_STEPS = 5000
+TRAINING_STEPS = 5000000
 ENV_ID = 'Alien-ramDeterministic-v4'
 
 # === Misc ===
@@ -181,7 +181,7 @@ pool = UnsafePool(16)
 # === Generate random skills ===
 skills = random_sequences(
                         length=SKILL_LENGTH,
-                        seq_num=30,
+                        seq_num=300,
                         vocab_size=ACTION_SPACE)
 div_skills = divide_skills(skills)
 scores = get_scores(div_skills)
@@ -243,7 +243,7 @@ for iteration in range(NUM_ITERATION):
 
 
     # get top N scored skills
-    top_100_skills, top_100_scores = get_top_n(N=10,
+    top_100_skills, top_100_scores = get_top_n(N=100,
                                                seqs=skills,
                                                scores=scores)
 
