@@ -4,18 +4,11 @@ import time
 import logging
 import multiprocessing
 
-from contextlib import closing
-from functools import partial
-
+# add library path
 sys.path.append(os.path.abspath('./nao_search'))
 sys.path.append(os.path.abspath('../lib'))
 
-import gym
-
-from stable_baselines import PPO2
-from stable_baselines.common.vec_env import DummyVecEnv
-from stable_baselines.common.policies import MlpPolicy
-
+# nao search
 from nao_search import epd
 from nao_search.common.utils import random_sequences
 from nao_search.common.utils import min_max_normalization
@@ -25,16 +18,29 @@ from nao_search.common.utils import get_top_n
 from nao_search.common.logger import Logger
 from nao_search.common.logger import LoggingConfig
 
+from nao_search.processes import UnsafePool
+
+# openai gym
+import gym
+
+from stable_baselines import PPO2
+from stable_baselines.common.vec_env import DummyVecEnv
+from stable_baselines.common.policies import MlpPolicy
+
+# atari
 from env_wrapper import ActionRemapWrapper, SkillWrapper
 from manager import AtariPolicyManager
 
+
+
+# === use logging config ===
 LoggingConfig.Use(filename='nao_skill_search_atari_(1, 9).train.log', 
                   output_to_file=True,
                   level='DEBUG')
 
 LOG = Logger('nao_search')
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
 
 # === Parameters ===
 SKILL_LENGTH = 9
@@ -61,21 +67,11 @@ TENSORBOARD_LOGNAME = 'nao_skill_search_atari_({}, {})'.format(NUM_SKILLS_PER_SE
 # ==================
 
 
+
+
 # === Utility ===
-
-# === custom non-daemon process ===
-class NonDaemonProcess(multiprocessing.Process):
-    def _get_daemon(self):
-        return False
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-
-class Pool(multiprocessing.pool.Pool):
-    Process = NonDaemonProcess
-
-
 def evaluate(skill):
+
     t_eval_start = time.time()
     env_creator = lambda: ActionRemapWrapper(gym.make(ENV_ID))
     atari_manager = AtariPolicyManager(env_creator=env_creator, 
@@ -89,14 +85,14 @@ def evaluate(skill):
     return ave_score, time.time()-t_eval_start
 
 def get_scores(skills):
-    LOG.LOG.propagate = True
+    global pool # process pool
+
     LOG.info('start evaluation')
 
     t_start = time.time()
 
     # evaluate scores of every skills using multiprocessing
-    with closing(Pool(16)) as pool:
-        res = pool.map(evaluate, skills)
+    res = pool.map(evaluate, skills)
     
     _scores, _times = zip(*res)
     t_sum = sum(_times)
@@ -117,8 +113,9 @@ def make_dirs(path):
             raise
 
 
-
 def divide_skills(skills):
+    # divide long skills into skill sets
+
     def divide_skill(skill):
         
         assert len(skill) // NUM_SKILLS_PER_SET == SKILL_LENGTH
@@ -152,21 +149,33 @@ def log_top_n_scores(N, _skills, _scores):
 
 
 def output_skills(path, _skills, _scores):
+    # print skills to file
     with open(path, 'w') as f:
         for skill, score in zip(_skills, _scores):
-            f.write('{}:{}'.format(skill, score))
+            f.write('{}:{}\n'.format(skill, score))
 # ===============
 
 
-# multiprocessing: prevent recursion
+
+
+# === Initialize ===
+# prevent from recursive call by child processes
 if __name__ != '__main__':
     exit()
 
-# === Initialize ===
+# create dirs
 make_dirs(MODEL_SAVE_PATH)
 make_dirs(SKILL_SAVE_PATH)
+
+# calculate the total length of flattened skill set
 TOTAL_SKILL_LENGTH = SKILL_LENGTH * NUM_SKILLS_PER_SET
+# set environment variables
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+# create process pool
+multiprocessing.set_start_method('fork')
+pool = UnsafePool(16)
 # ==================
+
 
 
 # === Generate random skills ===
@@ -174,9 +183,7 @@ skills = random_sequences(
                         length=SKILL_LENGTH,
                         seq_num=30,
                         vocab_size=ACTION_SPACE)
-
 div_skills = divide_skills(skills)
-
 scores = get_scores(div_skills)
 # ==============================
 
@@ -208,8 +215,6 @@ model = epd.BaseModel(
 # ====================
 
 
-
-
     
 
 # === Start NAO skill search ===
@@ -217,6 +222,7 @@ for iteration in range(NUM_ITERATION):
 
 
     MODEL_NAME = TENSORBOARD_LOGNAME + '_iter{}'.format(iteration)
+    # check if it is the first iteration or not
     is_first_iteration = 0 == iteration
 
     # normalize scores
@@ -224,6 +230,7 @@ for iteration in range(NUM_ITERATION):
                                         lower=0.2,
                                         upper=0.8
                                         )
+    
 
     # fit (skills, norm_scores)
     model.learn(X=skills,
@@ -237,8 +244,8 @@ for iteration in range(NUM_ITERATION):
 
     # get top N scored skills
     top_100_skills, top_100_scores = get_top_n(N=10,
-                                               seqs=top_100_skills,
-                                               scores=top_100_scores)
+                                               seqs=skills,
+                                               scores=scores)
 
     # generate new skills
     new_skills, _ = model.predict(seeds=top_100_skills,
