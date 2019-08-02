@@ -2,6 +2,10 @@ import os
 import sys
 import time
 import logging
+import multiprocessing
+
+from contextlib import closing
+from functools import partial
 
 sys.path.append(os.path.abspath('./nao_search'))
 sys.path.append(os.path.abspath('../lib'))
@@ -30,7 +34,7 @@ LoggingConfig.Use(filename='nao_skill_search_atari_(1, 9).train.log',
 
 LOG = Logger('nao_search')
 
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 # === Parameters ===
 SKILL_LENGTH = 9
@@ -43,7 +47,7 @@ CPU = 1
 EPOCHS = 300
 EVAL_INTERVAL = 50
 LOG_INTERVAL = 1
-TRAINING_STEPS = 5000000
+TRAINING_STEPS = 5000
 
 ENV_ID = 'Alien-ramDeterministic-v4'
 MODEL_SAVE_PATH = './models'
@@ -54,22 +58,47 @@ TENSORBOARD_LOGNAME = 'nao_skill_search_atari_(1, 9)'
 
 
 # === Utility ===
+class NonDaemonProcess(multiprocessing.Process):
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+class Pool(multiprocessing.pool.Pool):
+    Process = NonDaemonProcess
+
+
+def evaluate(skill):
+    t_eval_start = time.time()
+    env_creator = lambda: ActionRemapWrapper(gym.make(ENV_ID))
+    atari_manager = AtariPolicyManager(env_creator=env_creator, 
+                                       model=PPO2, 
+                                       policy=MlpPolicy,
+                                       save_path='alien',
+                                       verbose=0,
+                                       num_cpu=4)
+    ave_score, ave_action_reward = atari_manager.get_rewards(skill, train_total_timesteps=TRAINING_STEPS)
+
+    return ave_score, time.time()-t_eval_start
+
 def get_scores(skills):
-    _scores = []
+    LOG.LOG.propagate = True
+    LOG.info('start evaluation')
 
-    for skill in skills:
-        env_creator = lambda: ActionRemapWrapper(gym.make(ENV_ID))
-        atari_manager = AtariPolicyManager(env_creator=env_creator, 
-                                           model=PPO2, 
-                                           policy=MlpPolicy,
-                                           save_path='alien',
-                                           verbose=0,
-                                           num_cpu=15)
-        ave_score, ave_action_reward = atari_manager.get_rewards(skill, train_total_timesteps=TRAINING_STEPS)
+    t_start = time.time()
 
-        _scores.append(ave_score)
+    # evaluate scores of every skills using multiprocessing
+    with closing(Pool(16)) as pool:
+        res = pool.map(evaluate, skills)
+    
+    _scores, _times = zip(*res)
+    t_sum = sum(_times)
+    t_mean = t_sum / len(_times)
 
-    return _scores
+    LOG.info('skill evaluation done, total: {:.6f} sec, mean: {:.6f} sec'.format(t_sum, t_mean))
+
+    return list(_scores)
     
 
 
@@ -80,6 +109,8 @@ def make_dirs(path):
     except os.error as e:
         if e.errno != errno.EEXIST:
             raise
+
+
 
 def divide_skills(skills):
     def divide_skill(skill):
@@ -121,6 +152,10 @@ def output_skills(path, _skills, _scores):
 # ===============
 
 
+# multiprocessing: prevent recursion
+if __name__ != '__main__':
+    exit()
+
 # === Initialize ===
 make_dirs(MODEL_SAVE_PATH)
 make_dirs(SKILL_SAVE_PATH)
@@ -131,7 +166,7 @@ TOTAL_SKILL_LENGTH = SKILL_LENGTH * NUM_SKILLS_PER_SET
 # === Generate random skills ===
 skills = random_sequences(
                         length=SKILL_LENGTH,
-                        seq_num=300,
+                        seq_num=30,
                         vocab_size=ACTION_SPACE)
 
 div_skills = divide_skills(skills)
@@ -150,7 +185,7 @@ LOG.dump_to_log(level=logging.INFO)
 
 
 # === Create model ===
-model = epd.Model(
+model = epd.BaseModel(
                   source_length=SKILL_LENGTH,
                   encoder_length=SKILL_LENGTH,
                   decoder_length=SKILL_LENGTH,
@@ -195,7 +230,7 @@ for iteration in range(NUM_ITERATION):
 
 
     # get top N scored skills
-    top_100_skills, top_100_scores = get_top_n(N=100,
+    top_100_skills, top_100_scores = get_top_n(N=10,
                                                seqs=top_100_skills,
                                                scores=top_100_scores)
 
